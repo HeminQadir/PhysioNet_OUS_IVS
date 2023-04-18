@@ -24,9 +24,7 @@ import torch.nn as nn
 import torchaudio
 import torchaudio.transforms
 from torch.nn import functional as F
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import train_test_split
-import scipy as sp, scipy.io
 ##################################### our code ####################################
 
 def SplitData(root_folder, split=True, split_ratio=0.33):
@@ -244,7 +242,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
     loss_reg = nn.MSELoss()
     optim = torch.optim.SGD(outcome_model.parameters(), lr=h_lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optim, h_stepsize, h_decay)
-    writer = SummaryWriter()
 
     try:
         for epoch in range(h_epoch):
@@ -272,8 +269,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 FP += (predict == False).sum()
                 
             precision = TP / float(TP+FP) * 100
-            writer.add_scalar('Loss/train', total_loss, epoch)
-            writer.add_scalar('Prediction/train', precision, epoch)
+
             print("[{:3d}/{:3d}] loss: {:.6f}".format(epoch+1, h_epoch, total_loss))
             
             """
@@ -297,8 +293,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     FP += (predict == False).sum()
                     
                 precision = TP / float(TP+FP) * 100
-                writer.add_scalar('Loss/test', total_loss, epoch/h_test)
-                writer.add_scalar('Prediction/test', precision, epoch/h_test)
                 print("----- Test -----")
                 print("Precision: {:5.2f}%".format(precision))
                 print("-----------------")
