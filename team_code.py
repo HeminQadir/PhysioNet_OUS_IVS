@@ -198,9 +198,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
     ################################# Challenge Models ################################
 
     ################################# Our Models ################################
-    split = True
+    split = False
     ratio = 0.05
-    X_train_, X_test_, y_train_, y_test_ = SplitData(data_folder, split=split, split_ratio=ratio)
+    #X_train_, X_test_, y_train_, y_test_ = SplitData(data_folder, split=split, split_ratio=ratio)
+    X_train_, y_train_ = SplitData(data_folder, split=split, split_ratio=ratio)
 
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
@@ -208,10 +209,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
     channels = ['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2', 'Fp1-F3',
             'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'Fz-Cz', 'Cz-Pz']
     
-    #X_train, y_train = load_train_test_data(data_folder, channels, X_train_, y_train_)
-    X_test, y_test = load_train_test_data(data_folder, channels, X_test_, y_test_)
-    X_train = X_test
-    y_train = y_test
+    X_train, y_train = load_train_test_data(data_folder, channels, X_train_, y_train_)
+    #X_test, y_test = load_train_test_data(data_folder, channels, X_test_, y_test_)
+    #X_train = X_test
+    #y_train = y_test
     transforms = torchaudio.transforms.MelSpectrogram(sample_rate=100, n_fft=200, n_mels=128)
 
     #X_test_, y_test_ = Dataset(X_test, y_test, transforms)
@@ -347,35 +348,39 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
             signal_data = reorder_recording_channels(signal_data, signal_channels, channels)
             if signal_data.sum() != 0.0:
                 Test_Data.append(signal_data)
-    X_test = Test_Data[0]
-    X_test = torch.from_numpy(X_test)
-    transforms = torchaudio.transforms.MelSpectrogram(sample_rate=100, n_fft=200, n_mels=128)
-    #hyper parameters
-    h_sequence = 300
-    h_seg = 30
-    #print(x.shape)
-    x = transforms(X_test)
-    #print(x.shape)
-    x = x[:,:,:h_sequence].transpose(1,2)
-    #print(x.shape)
-    x = x.view(x.shape[0], int(h_sequence/h_seg), h_seg, x.shape[2]) + 0.001
-    x = x.log2()
-    x = x.cuda()
+    try:
+        X_test = Test_Data[0]
+        X_test = torch.from_numpy(X_test)
+        transforms = torchaudio.transforms.MelSpectrogram(sample_rate=100, n_fft=200, n_mels=128)
+        #hyper parameters
+        h_sequence = 300
+        h_seg = 30
+        #print(x.shape)
+        x = transforms(X_test)
+        #print(x.shape)
+        x = x[:,:,:h_sequence].transpose(1,2)
+        #print(x.shape)
+        x = x.view(x.shape[0], int(h_sequence/h_seg), h_seg, x.shape[2]) + 0.001
+        x = x.log2()
+        x = x.cuda()
 
-    # Apply models to features.
-    outputs, cpc = models(x)
-    outcome_probabilities = F.softmax(outputs[0,:], dim=0)
-    outcome = torch.argmax(outcome_probabilities)
-    outcome_probability = outcome_probabilities[outcome]
-    outcome_probability = outcome_probability.data.cpu().item()
-    outcome = outcome.data.cpu().item()
-    
-    #outcome = outcome_model.predict(features)[0]
-    #outcome_probability = outcome_model.predict_proba(features)[0, 1]
-    #cpc = cpc_model.predict(features)[0]
-    # Ensure that the CPC score is between (or equal to) 1 and 5.
-    cpc = cpc*5 #np.clip(cpc, 1, 5)
-    cpc = cpc.mean().data.cpu().item()
+        # Apply models to features.
+        outputs, cpc = models(x)
+        outcome_probabilities = F.softmax(outputs[0,:], dim=0)
+        outcome = torch.argmax(outcome_probabilities)
+        outcome_probability = outcome_probabilities[outcome]
+        outcome_probability = outcome_probability.data.cpu().item()
+        outcome = outcome.data.cpu().item()
+        
+        #outcome = outcome_model.predict(features)[0]
+        #outcome_probability = outcome_model.predict_proba(features)[0, 1]
+        #cpc = cpc_model.predict(features)[0]
+        # Ensure that the CPC score is between (or equal to) 1 and 5.
+        cpc = cpc*5 #np.clip(cpc, 1, 5)
+        cpc = cpc.mean().data.cpu().item()
+    except:
+        outcome, outcome_probability, cpc = float('nan'), float('nan'), float('nan')
+        
     return outcome, outcome_probability, cpc
 
 ################################################################################
