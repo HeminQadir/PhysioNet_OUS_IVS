@@ -278,10 +278,10 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
                 optimizer.step()
 
                 total_loss += loss.item()
-                print("[{:3d}/{:3d}] loss: {:.6f}".format(epoch+1, num_epochs, loss.item()))
+                print("[{:3d}/{:3d}] loss: {:.6f}".format(epoch, num_epochs, loss.item()))
 
             print("="*80)
-            print("[{:3d}/{:3d}] total loss: {:.6f}".format(epoch+1, num_epochs, total_loss))
+            print("[{:3d}/{:3d}] total loss: {:.6f}".format(epoch, num_epochs, total_loss))
 
             """
             Test
