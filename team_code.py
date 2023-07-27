@@ -615,7 +615,7 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
 
     train_batch_size = train_batch_size // gradient_accumulation_steps
 
-    split = False
+    split = True
     split_ratio = 0.1
     shuffle = True
 
@@ -648,10 +648,10 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
         sampler = get_upsampled_loader(train_labels)
         train_loader =  DataLoader(trainset, batch_size=train_batch_size, sampler=sampler) #shuffle=shuffle)
 
-        data_folder_val = "/media/jacobo/NewDrive/physionet.org/files/i-care/2.0/validation"
-        X_val = load_train_val_files(data_folder_val, split, split_ratio)
-        valset = dataset(data_folder_val, X_val)
-        val_loader =  DataLoader(valset, batch_size=eval_batch_size, shuffle=shuffle)
+        #data_folder_val = "/media/jacobo/NewDrive/physionet.org/files/i-care/2.0/validation"
+        #X_val = load_train_val_files(data_folder_val, split, split_ratio)
+        #valset = dataset(data_folder_val, X_val)
+        #val_loader =  DataLoader(valset, batch_size=eval_batch_size, shuffle=shuffle)
     
 
     weight_decay = 0
@@ -728,9 +728,9 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     input_length = 30000
     train_batch_size = 10
     eval_batch_size = 10 
-    eval_every = 2500
+    eval_every = 500
     learning_rate = 1e-4 
-    num_steps = 20000
+    num_steps = 15000
     local_rank = -1
     seed = 42
     fp16 = False
