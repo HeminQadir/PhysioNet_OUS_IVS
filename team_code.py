@@ -351,7 +351,7 @@ def segment_eeg_signal(eeg_signal, window_size, step_size, Fs):
 
 
 #%%
-def load_data(data_folder, patient_id):
+def load_data(data_folder, patient_id, train=True):
     # Load patient data.
     patient_metadata = load_challenge_data(data_folder, patient_id)
     recording_ids = find_recording_files(data_folder, patient_id)
@@ -436,19 +436,27 @@ def load_data(data_folder, patient_id):
 
     #last_5_min_data = rescale_data(last_5_min_data)
     
-    # Extract labels.
-    outcome = int(get_outcome(patient_metadata))
-    #print(outcome)
-    cpc = int(get_cpc(patient_metadata))
-    #print(cpc)
 
-    x = torch.from_numpy(data_5_min)
-    outcome = torch.tensor(outcome, dtype=torch.long)
-    cpc = torch.tensor(cpc, dtype=torch.long)
+    if train:
+        # Extract labels.
+        outcome = int(get_outcome(patient_metadata))
+        #print(outcome)
+        cpc = int(get_cpc(patient_metadata))
+        #print(cpc)
 
-    #outcome = number_to_one_hot(outcome, 2)
+        x = torch.from_numpy(data_5_min)
+        outcome = torch.tensor(outcome, dtype=torch.long)
+        cpc = torch.tensor(cpc, dtype=torch.long)
 
-    return x, outcome, cpc
+        #outcome = number_to_one_hot(outcome, 2)
+
+        return x, outcome, cpc
+    
+    else:
+        x = torch.from_numpy(data_5_min)
+
+        return x
+
 
 #%%
 class dataset(Dataset):
@@ -763,10 +771,8 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
 # arguments of this function.
 def run_challenge_models(models, data_folder, patient_id, verbose):
 
-    x, true_outcome, true_cpcs = load_data(data_folder, patient_id)
+    x = load_data(data_folder, patient_id, train=False)
     x = x.cuda()
-    true_cpcs = true_cpcs.cuda()
-    true_outcome = true_outcome.cuda()
 
     if len(x)>0:
         # Apply models to features.
