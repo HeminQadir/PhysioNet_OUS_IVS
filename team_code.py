@@ -416,15 +416,16 @@ def load_data(data_folder, patient_id, train=True):
                         break
 
                     else:
-                        print(patient_id)
-                        print("Not all channels are available")
+                        pass
                 else:
                     pass
             else: 
-                print(patient_id)
-                print("Header file is not available")
+                pass
     else: 
         print(patient_id)
+        size = 30000
+        bipolar_data = np.zeros((2, size), dtype=np.float32)
+        sampling_frequency = 100
         print("There is no EEG recording")
 
     #last_5_min = int(sampling_frequency * 60 * 5)
@@ -436,7 +437,6 @@ def load_data(data_folder, patient_id, train=True):
 
     #last_5_min_data = rescale_data(last_5_min_data)
     
-
     if train:
         # Extract labels.
         outcome = int(get_outcome(patient_metadata))
@@ -736,7 +736,7 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     input_length = 30000
     train_batch_size = 10
     eval_batch_size = 10 
-    eval_every = 500
+    eval_every = 10
     learning_rate = 1e-4 
     num_steps = 15000
     local_rank = -1
