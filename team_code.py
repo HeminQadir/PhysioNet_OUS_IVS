@@ -367,6 +367,10 @@ def load_data(data_folder, patient_id, train=True):
     eeg_channels = ['F3', 'P3', 'F4', 'P4'] #['Fp1', 'F3', 'C3', 'P3', 'F7', 'T3', 'T5', 'O1', 'Fz', 'Cz', 'Pz', 'Fp2', 'F4', 'C4', 'P4', 'F8', 'T4', 'T6', 'O2'] #
     group = 'EEG'
 
+    size = 30000
+    bipolar_data = np.zeros((2, size), dtype=np.float32)
+    sampling_frequency = 100
+    
     # check if there is at least one EEG record
     if num_recordings > 0:
 
@@ -422,12 +426,9 @@ def load_data(data_folder, patient_id, train=True):
             else: 
                 pass
     else: 
-        print(patient_id)
-        size = 30000
-        bipolar_data = np.zeros((2, size), dtype=np.float32)
-        sampling_frequency = 100
-        print("There is no EEG recording")
+        pass
 
+    if 
     #last_5_min = int(sampling_frequency * 60 * 5)
     #last_5_min_data = bipolar_data[:, -last_5_min:]
     
