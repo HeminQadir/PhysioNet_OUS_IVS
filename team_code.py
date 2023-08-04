@@ -114,34 +114,6 @@ def load_train_val_files(data_folder, split=True, split_ratio=0.1):
         return X_train
 
 
-#%%
-# Preprocess data.
-def preprocess_data(data, sampling_frequency, utility_frequency):
-    # Define the bandpass frequencies.
-    passband = [0.1, 30.0]
-
-    # Promote the data to double precision because these libraries expect double precision.
-    data = np.asarray(data, dtype=np.float64)
-
-    # If the utility frequency is between bandpass frequencies, then apply a notch filter.
-    if utility_frequency is not None and passband[0] <= utility_frequency <= passband[1]:
-        data = mne.filter.notch_filter(data, sampling_frequency, utility_frequency, n_jobs=4, verbose='error')
-
-    # Apply a bandpass filter.
-    data = mne.filter.filter_data(data, sampling_frequency, passband[0], passband[1], n_jobs=4, verbose='error')
-
-    # Resample the data.
-    if sampling_frequency % 2 == 0:
-        resampling_frequency = 100
-    else:
-        resampling_frequency = 100
-    lcm = np.lcm(int(round(sampling_frequency)), int(round(resampling_frequency)))
-    up = int(round(lcm / sampling_frequency))
-    down = int(round(lcm / resampling_frequency))
-    resampling_frequency = sampling_frequency * up / down
-    data = scipy.signal.resample_poly(data, up, down, axis=1)
-
-    return data, resampling_frequency
 
 #%%
 def rescale_data(data):
@@ -326,7 +298,9 @@ def segment_eeg_signal(eeg_signal, window_size, step_size, Fs):
     window_size ---> in min
     window_step ---> in min
     """
-    
+    if Fs == 0:
+        Fs = 100
+
     # Calculate the number of samples per window
     window_samples = int(round(window_size*60*Fs))
 
@@ -369,7 +343,6 @@ def load_data(data_folder, patient_id, train=True):
 
     size = 30000
     bipolar_data = np.zeros((2, size), dtype=np.float32)
-    sampling_frequency = 100
     
     # check if there is at least one EEG record
     if num_recordings > 0:
@@ -425,12 +398,11 @@ def load_data(data_folder, patient_id, train=True):
                     pass
             else: 
                 pass
-    else: 
-        pass
 
     #last_5_min = int(sampling_frequency * 60 * 5)
     #last_5_min_data = bipolar_data[:, -last_5_min:]
     
+    sampling_frequency = 100
     segments = segment_eeg_signal(bipolar_data, 5, 3, sampling_frequency)
     indx = random.randint(0, len(segments)-1)
     data_5_min = segments[indx]
@@ -738,7 +710,7 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     eval_batch_size = 10 
     eval_every = 500
     learning_rate = 1e-4 
-    num_steps = 15000
+    num_steps = 20000
     local_rank = -1
     seed = 42
     fp16 = False
@@ -779,7 +751,6 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
         models.eval()
         outputs, pred_cpcs, _ = models(x.unsqueeze(0))
         
-        #print(outputs)
         outcome_probabilities = F.softmax(outputs[0])
                 
         pred_outcome = torch.argmax(outcome_probabilities)
@@ -801,7 +772,6 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
         pred_outcome, outcome_probability, pred_cpcs = float(0), float(0), float(0) #float('nan'), float('nan'), float('nan')
 
     return pred_outcome, outcome_probability, pred_cpcs
-
 
 
 #%%
