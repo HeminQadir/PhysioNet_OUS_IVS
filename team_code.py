@@ -428,7 +428,6 @@ def load_data(data_folder, patient_id, train=True):
     else: 
         pass
 
-    if 
     #last_5_min = int(sampling_frequency * 60 * 5)
     #last_5_min_data = bipolar_data[:, -last_5_min:]
     
