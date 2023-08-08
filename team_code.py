@@ -346,8 +346,9 @@ def load_data(data_folder, patient_id, train=True):
     
     # check if there is at least one EEG record
     if num_recordings > 0:
-
-        for recording_id in reversed(recording_ids):
+        random.shuffle(recording_ids)
+        
+        for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
                 sampling_frequency, length = load_recording_header(recording_location, check_values=True)  # we created to read only the header and get the fs
@@ -542,6 +543,7 @@ def valid(model, val_loader, global_step, eval_batch_size, local_rank, device):
     FP = 0
     TN = 0
     FN = 0
+
     for step, batch in enumerate(epoch_iterator):
 
         data = batch
@@ -576,6 +578,8 @@ def valid(model, val_loader, global_step, eval_batch_size, local_rank, device):
     all_preds, all_label = all_preds[0], all_label[0]
     #accuracy = simple_accuracy(all_preds, all_label)
     precision = TP / float(TP+FP) * 100
+
+    print("precision: ", precision)
 
     return precision #accuracy
 
