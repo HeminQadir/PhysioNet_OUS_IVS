@@ -338,11 +338,11 @@ def load_data(data_folder, patient_id, train=True):
     #print(patient_features)
 
     # Load EEG recording.    
-    eeg_channels = ['Fp1', 'F3', 'C3', 'P3', 'F7', 'T3', 'T5', 'O1', 'Fz', 'Cz', 'Pz', 'Fp2', 'F4', 'C4', 'P4', 'F8', 'T4', 'T6', 'O2'] # #['F3', 'P3', 'F4', 'P4'] #
+    eeg_channels = ['F3', 'P3', 'F4', 'P4'] #['Fp1', 'F3', 'C3', 'P3', 'F7', 'T3', 'T5', 'O1', 'Fz', 'Cz', 'Pz', 'Fp2', 'F4', 'C4', 'P4', 'F8', 'T4', 'T6', 'O2'] # 
     group = 'EEG'
 
     size = 30000
-    bipolar_data = np.zeros((18, size), dtype=np.float32)
+    bipolar_data = np.zeros((2, size), dtype=np.float32)
     # bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
 
     # check if there is at least one EEG record
@@ -365,32 +365,32 @@ def load_data(data_folder, patient_id, train=True):
                         data, channels = reduce_channels(data, channels, eeg_channels)
                         data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
                         data = rescale_data(data)
-                        #bipolar_data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]], dtype=np.float32) # Convert to bipolar montage: F3-P3 and F4-P4 
+                        bipolar_data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]], dtype=np.float32) # Convert to bipolar montage: F3-P3 and F4-P4 
                         
-                        bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
+                        # bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
 
-                        bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
-                        bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
-                        bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
-                        bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
+                        # bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
+                        # bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
+                        # bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
+                        # bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
                     
-                        bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
-                        bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
-                        bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
-                        bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
+                        # bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
+                        # bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
+                        # bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
+                        # bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
                     
-                        bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
-                        bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
-                        bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
-                        bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
+                        # bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
+                        # bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
+                        # bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
+                        # bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
                     
-                        bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
-                        bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
-                        bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
-                        bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
+                        # bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
+                        # bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
+                        # bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
+                        # bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
                     
-                        bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
-                        bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
+                        # bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
+                        # bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
 
                         break
 
@@ -491,8 +491,8 @@ def get_config():
     config.hidden_size = 768
     config.transformer = ml_collections.ConfigDict()
     config.transformer.mlp_dim = 3072
-    config.transformer.num_heads = 2
-    config.transformer.num_layers = 2
+    config.transformer.num_heads = 8
+    config.transformer.num_layers = 8
     config.transformer.attention_dropout_rate = 0.0
     config.transformer.dropout_rate = 0.1
     config.classifier = 'token'
@@ -720,7 +720,7 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     seed = 42
     fp16 = False
     num_classes = 2
-    in_channels = 18
+    in_channels = 2
 
     # Setup CUDA, GPU & distributed training
     if local_rank == -1:
@@ -888,7 +888,7 @@ class Mlp(nn.Module):
 
 # Define your deep learning model
 class Embeddings(nn.Module):
-    def __init__(self, config, input_length, in_channels=18):
+    def __init__(self, config, input_length, in_channels=2):
         super(Embeddings, self).__init__()
         self.hidden_size = config.hidden_size
         self.in_channels = in_channels
@@ -903,7 +903,7 @@ class Embeddings(nn.Module):
         self.patch_embeddings =  FeatureExtractor(config, in_channels)
         #torch.Size([10, 512, 12])
 
-        n_patches = 216 #in_channels*(int((input_length - patch_size) / patch_size ) + 1)
+        n_patches = 24 #in_channels*(int((input_length - patch_size) / patch_size ) + 1)
         #print(n_patches)
         self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
 
@@ -1040,8 +1040,8 @@ class VisionTransformer(nn.Module):
         self.classifier = config.classifier
 
         self.transformer = Transformer(config, input_length, vis)
-        self.head = Linear(config.hidden_size*217, num_classes)
-        self.regress = Linear(config.hidden_size*217, 1)
+        self.head = Linear(config.hidden_size*25, num_classes)
+        self.regress = Linear(config.hidden_size*25, 1)
 
     def forward(self, x, labels=None, cpcs=None):
         #print(x.shape)
