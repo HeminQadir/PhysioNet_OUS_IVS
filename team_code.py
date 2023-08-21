@@ -25,7 +25,15 @@ import math
 import copy
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
+import time
+import scipy.signal as signal
+from scipy.signal import butter, lfilter
 
+import torchaudio.functional as FA
+import torchaudio
+#import torchaudio.functional as F
+#import torchaudio.transforms as T
+import julius
 
 #%%
 class WarmupLinearSchedule(LambdaLR):
@@ -212,36 +220,9 @@ def load_recording_header(record_name, check_values=True):
     return sampling_frequency, length
 
 #%%
-# Extract patient features from the data.
-def get_patient_features(data):
-    age = get_age(data)
-    sex = get_sex(data)
-    rosc = get_rosc(data)
-    ohca = get_ohca(data)
-    shockable_rhythm = get_shockable_rhythm(data)
-    ttm = get_ttm(data)
 
-    if sex == 'Female':
-        female = 1
-        male   = 0
-        other  = 0
-    elif sex == 'Male':
-        female = 0
-        male   = 1
-        other  = 0
-    else:
-        female = 0
-        male   = 0
-        other  = 1
-
-    features = np.array((age, female, male, other, rosc, ohca, shockable_rhythm, ttm), dtype=np.float32)
-
-    return features
-
-
-#%%
 # Preprocess data.
-def preprocess_data(data, sampling_frequency, utility_frequency):
+def preprocess_data_old(data, sampling_frequency, utility_frequency):
     # Define the bandpass frequencies.
     passband = [0.1, 30.0]
 
@@ -269,11 +250,52 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
     return data, resampling_frequency
 
 
+def preprocess_data(data, sampling_frequency, utility_frequency, device):
+    # Define the bandpass frequencies.
+    passband = [0.1, 30.0]
+
+    # Promote the data to double precision because these libraries expect double precision.
+    #data = np.asarray(data, dtype=np.float64)
+
+
+    # # If the utility frequency is between bandpass frequencies, then apply a notch filter.
+    # if utility_frequency is not None and passband[0] <= utility_frequency <= passband[1]:
+    #     data = notch_filter(data, sampling_frequency, utility_frequency)
+
+    # Apply a bandpass filter.
+    
+    #data = bandpass_filter(data, sampling_frequency, passband[0], passband[1], device)
+
+    if sampling_frequency > 2000:
+        data = julius.resample_frac(data, int(sampling_frequency), 1024)
+        sampling_frequency = 1024
+
+    low = passband[0]/int(sampling_frequency)
+    high = passband[1]/int(sampling_frequency)
+
+    bandpass = julius.BandPassFilter(low, high)
+    bandpass = bandpass.to(device)
+    data = bandpass(data)
+    
+    # Resample the data.
+    if sampling_frequency % 2 == 0:
+        resampling_frequency = 100
+    else:
+        resampling_frequency = 100
+
+    #resampler = T.Resample(sampling_frequency, resampling_frequency, dtype=data.dtype)
+    #resampler.cuda()
+    #data_resampled = resampler(data)
+
+    data_resampled = julius.resample_frac(data, int(sampling_frequency), int(resampling_frequency))
+
+    return data_resampled, resampling_frequency
+
 #%%
 def rescale_data(data):
     # Scale the data to the interval [-1, 1].
-    min_value = np.min(data)
-    max_value = np.max(data)
+    min_value = torch.min(data)
+    max_value = torch.max(data)
     if min_value != max_value:
         data = 2.0 / (max_value - min_value) * (data - 0.5 * (min_value + max_value))
     else:
@@ -323,9 +345,8 @@ def segment_eeg_signal(eeg_signal, window_size, step_size, Fs):
     return segments
 
 
-
 #%%
-def load_data(data_folder, patient_id, train=True):
+def load_data(data_folder, patient_id, device, train=True):
     # Load patient data.
     patient_metadata = load_challenge_data(data_folder, patient_id)
     recording_ids = find_recording_files(data_folder, patient_id)
@@ -338,11 +359,13 @@ def load_data(data_folder, patient_id, train=True):
     #print(patient_features)
 
     # Load EEG recording.    
-    eeg_channels = ['F3', 'P3', 'F4', 'P4'] #['Fp1', 'F3', 'C3', 'P3', 'F7', 'T3', 'T5', 'O1', 'Fz', 'Cz', 'Pz', 'Fp2', 'F4', 'C4', 'P4', 'F8', 'T4', 'T6', 'O2'] # 
+    eeg_channels = ['Fp1', 'F3', 'C3', 'P3', 'F7', 'T3', 'T5', 'O1', 'Fz', 'Cz', 'Pz', 'Fp2', 'F4', 'C4', 'P4', 'F8', 'T4', 'T6', 'O2'] # #['F3', 'P3', 'F4', 'P4'] #
     group = 'EEG'
 
     size = 30000
-    bipolar_data = np.zeros((2, size), dtype=np.float32)
+    #bipolar_data = np.zeros((18, size), dtype=np.float32)
+    bipolar_data = torch.zeros((18, size), dtype=torch.float32)
+    bipolar_data  = bipolar_data.to(device)
     # bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
 
     # check if there is at least one EEG record
@@ -352,45 +375,48 @@ def load_data(data_folder, patient_id, train=True):
         for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
-                sampling_frequency, length = load_recording_header(recording_location, check_values=True)  # we created to read only the header and get the fs
-                five_min_recording = sampling_frequency * 60 * 5
-
                 # checking the length of the hour recording 
+                data, channels, sampling_frequency = load_recording_data(recording_location, check_values=True)
+                data = torch.tensor(data, dtype=torch.float32)
+                data = data.to(device)
+                utility_frequency = get_utility_frequency(recording_location + '.hea')
+                length = data.shape[1]
+                five_min_recording = sampling_frequency * 60 * 5
                 if length >= five_min_recording:
-                    data, channels, sampling_frequency = load_recording_data(recording_location, check_values=True)
-                    utility_frequency = get_utility_frequency(recording_location + '.hea')
-
                     # checking if we have all the channels 
                     if all(channel in channels for channel in eeg_channels):
                         data, channels = reduce_channels(data, channels, eeg_channels)
-                        data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
+                        data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency, device)
                         data = rescale_data(data)
-                        bipolar_data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]], dtype=np.float32) # Convert to bipolar montage: F3-P3 and F4-P4 
-                        
-                        # bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
 
-                        # bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
-                        # bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
-                        # bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
-                        # bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
+                        #bipolar_data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]], dtype=np.float32) # Convert to bipolar montage: F3-P3 and F4-P4 
+                        
+                        bipolar_data = torch.zeros((18, data.shape[1]), dtype=torch.float32)
+                        
+                        bipolar_data = bipolar_data.to(device)
+
+                        bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
+                        bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
+                        bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
+                        bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
                     
-                        # bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
-                        # bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
-                        # bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
-                        # bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
+                        bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
+                        bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
+                        bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
+                        bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
                     
-                        # bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
-                        # bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
-                        # bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
-                        # bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
+                        bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
+                        bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
+                        bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
+                        bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
                     
-                        # bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
-                        # bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
-                        # bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
-                        # bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
+                        bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
+                        bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
+                        bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
+                        bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
                     
-                        # bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
-                        # bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
+                        bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
+                        bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
 
                         break
 
@@ -409,6 +435,7 @@ def load_data(data_folder, patient_id, train=True):
     indx = random.randint(0, len(segments)-1)
     data_5_min = segments[indx]
 
+
     #last_5_min_data = rescale_data(last_5_min_data)
     
     if train:
@@ -418,35 +445,35 @@ def load_data(data_folder, patient_id, train=True):
         cpc = int(get_cpc(patient_metadata))
         #print(cpc)
 
-        x = torch.from_numpy(data_5_min)
-        outcome = torch.tensor(outcome, dtype=torch.long)
-        cpc = torch.tensor(cpc, dtype=torch.long)
+        x = data_5_min #torch.from_numpy(data_5_min)
 
+        outcome = torch.tensor(outcome, dtype=torch.long)
+        outcome = outcome.to(device)
+
+        cpc = torch.tensor(cpc, dtype=torch.long)
+        cpc = cpc.to(device)
         #outcome = number_to_one_hot(outcome, 2)
 
         return x, outcome, cpc
-    
     else:
-        x = torch.from_numpy(data_5_min)
-
+        x = data_5_min
         return x
 
 
 #%%
 class dataset(Dataset):
-    def __init__(self, data_folder, X_files, train=True):
+    def __init__(self, data_folder, X_files, device, train=True):
         self.X_files = X_files
         self.train=train
         self.data_folder = data_folder
+        self.device = device
 
     def __len__(self):
         return len(self.X_files)
 
     def __getitem__(self, idx):
         patient_id = self.X_files[idx]
-
-        x, outcome, cpc = load_data(self.data_folder, patient_id)
-        
+        x, outcome, cpc = load_data(self.data_folder, patient_id, self.device)
         return {"input":x, "outcome":outcome, "cpc": cpc/5.0}
 
 
@@ -489,25 +516,29 @@ def get_config():
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': 1000})
     config.hidden_size = 768
+    config.feature_extractor_size = 512
+    config.input_length = 30000
+    config.num_classes = 2
     config.transformer = ml_collections.ConfigDict()
     config.transformer.mlp_dim = 3072
-    config.transformer.num_heads = 8
-    config.transformer.num_layers = 8
+    config.transformer.num_heads = 12
+    config.transformer.num_layers = 12
     config.transformer.attention_dropout_rate = 0.0
     config.transformer.dropout_rate = 0.1
     config.classifier = 'token'
     config.representation_size = None
+    config.in_channels = 18
     return config
 
 #%%
-def setup(input_length, num_classes, in_channels, device):
+def setup(device):
     # Prepare model
     config =  get_config()
-    model = VisionTransformer(config, input_length, zero_head=True, num_classes=num_classes)
+    model = VisionTransformer(config)
     model.to(device)
     num_params = count_parameters(model)
     print(model)
-    print(num_params)
+    print("Number of parameters: ", num_params)
     return model
 
 # Save your trained model.
@@ -607,7 +638,7 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
     if split:
         X_train, X_val = load_train_val_files(data_folder, split, split_ratio)
         
-        trainset = dataset(data_folder, X_train)
+        trainset = dataset(data_folder, X_train, device)
         label = targets(data_folder, X_train)
         train_labels = list()
         for i, data in enumerate(label):
@@ -615,9 +646,10 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
             train_labels.append(label.item())
         train_labels = torch.tensor(train_labels)
         sampler = get_upsampled_loader(train_labels)
+        
         train_loader =  DataLoader(trainset, batch_size=train_batch_size, sampler=sampler) #shuffle=shuffle)
 
-        valset = dataset(data_folder, X_val)
+        valset = dataset(data_folder, X_val, device)
         val_loader =  DataLoader(valset, batch_size=eval_batch_size, shuffle=shuffle)
 
 
@@ -666,17 +698,19 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
                               bar_format="{l_bar}{r_bar}",
                               dynamic_ncols=True,
                               disable=local_rank not in [-1, 0])
+
+               
         for step, batch in enumerate(epoch_iterator):
+             
             data = batch
-            x, y, cpcs = data["input"].to(device), data["outcome"].to(device), data["cpc"].to(device)
+            #x, y, cpcs = data["input"].to(device), data["outcome"].to(device), data["cpc"].to(device)
+            x, y, cpcs = data["input"], data["outcome"], data["cpc"]
             #print("I am label: ", y)
+
             loss1, loss2 = model(x, y, cpcs)
-
             loss = loss1 + loss2 
-
             if gradient_accumulation_steps > 1:
                 loss = loss / gradient_accumulation_steps
-            
             loss.backward()
 
             if (step + 1) % gradient_accumulation_steps == 0:
@@ -710,22 +744,22 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
 def train_challenge_model(data_folder, model_folder, verbose=2):
     # Required parameters
     
-    input_length = 30000
     train_batch_size = 10
-    eval_batch_size = 10 
+    eval_batch_size = 10
     eval_every = 500
     learning_rate = 1e-4 
-    num_steps = 20000
+    num_steps = 40000
     local_rank = -1
     seed = 42
     fp16 = False
-    num_classes = 2
-    in_channels = 2
 
     # Setup CUDA, GPU & distributed training
     if local_rank == -1:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("#"*100)
+        print(device)
         n_gpu = torch.cuda.device_count()
+
     else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.cuda.set_device(local_rank)
         device = torch.device("cuda", local_rank)
@@ -737,7 +771,7 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     set_seed(seed=seed, n_gpu=n_gpu)
 
     # Model & Tokenizer Setup
-    model = setup(input_length, num_classes, in_channels, device)
+    model = setup(device)
 
     # Training
     train(model, data_folder, model_folder, device, num_steps, eval_every, local_rank, train_batch_size, eval_batch_size, learning_rate, n_gpu)
@@ -748,14 +782,14 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
 # arguments of this function.
 def run_challenge_models(models, data_folder, patient_id, verbose):
 
-    x = load_data(data_folder, patient_id, train=False)
-    x = x.cuda()
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    x = load_data(data_folder, patient_id, device, train=False)
+    
     if len(x)>0:
         # Apply models to features.
         models.eval()
         outputs, pred_cpcs, _ = models(x.unsqueeze(0))
-        
+
         outcome_probabilities = F.softmax(outputs[0])
                 
         pred_outcome = torch.argmax(outcome_probabilities)
@@ -888,10 +922,10 @@ class Mlp(nn.Module):
 
 # Define your deep learning model
 class Embeddings(nn.Module):
-    def __init__(self, config, input_length, in_channels=2):
+    def __init__(self, config):
         super(Embeddings, self).__init__()
         self.hidden_size = config.hidden_size
-        self.in_channels = in_channels
+        self.in_channels = config.in_channels
         patch_size = config.patches["size"]
 
         # self.patch_embeddings = nn.Conv1d(in_channels=in_channels, 
@@ -900,10 +934,10 @@ class Embeddings(nn.Module):
         #                                   stride=patch_size, 
         #                                   groups=in_channels)
 
-        self.patch_embeddings =  FeatureExtractor(config, in_channels)
+        self.patch_embeddings =  FeatureExtractor(config)
         #torch.Size([10, 512, 12])
 
-        n_patches = 24 #in_channels*(int((input_length - patch_size) / patch_size ) + 1)
+        n_patches = 216 #in_channels*(int((input_length - patch_size) / patch_size ) + 1)
         #print(n_patches)
         self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
 
@@ -1021,9 +1055,9 @@ class Encoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config,  input_length, vis):
+    def __init__(self, config, vis):
         super(Transformer, self).__init__()
-        self.embeddings = Embeddings(config, input_length)
+        self.embeddings = Embeddings(config)
         self.encoder = Encoder(config, vis)
 
     def forward(self, input_ids):
@@ -1033,15 +1067,13 @@ class Transformer(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    def __init__(self, config, input_length=30000, num_classes=1000, zero_head=False, vis=False):
+    def __init__(self, config, vis=False):
         super(VisionTransformer, self).__init__()
-        self.num_classes = num_classes
-        self.zero_head = zero_head
-        self.classifier = config.classifier
+        self.num_classes = config.num_classes
 
-        self.transformer = Transformer(config, input_length, vis)
-        self.head = Linear(config.hidden_size*25, num_classes)
-        self.regress = Linear(config.hidden_size*25, 1)
+        self.transformer = Transformer(config, vis)
+        self.head = Linear(config.hidden_size*217, config.num_classes)
+        self.regress = Linear(config.hidden_size*217, 1)
 
     def forward(self, x, labels=None, cpcs=None):
         #print(x.shape)
@@ -1100,24 +1132,32 @@ class NoLayerNormConvLayer(nn.Module):
         return x
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, config, in_channels):
+    def __init__(self, config):
         super().__init__()
 
-        out_channels  = int((config.hidden_size)*in_channels)
+        out_channels  = int((config.feature_extractor_size)*config.in_channels)
+        hidden_channels  = int((config.hidden_size)*config.in_channels)
 
         self.conv_layers = nn.ModuleList([
-            GroupNormConvLayer(in_channels, out_channels, 10, 5, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 5, 3, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 5, 3, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 5, 3, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 5, 2, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 3, 3, groups=in_channels),
-            NoLayerNormConvLayer(out_channels, out_channels, 3, 3, groups=in_channels)
+            GroupNormConvLayer(config.in_channels, int(out_channels/4), 10, 5, groups=config.in_channels),
+            NoLayerNormConvLayer(int(out_channels/4), int(out_channels/4), 5, 3, groups=config.in_channels),
+            NoLayerNormConvLayer(int(out_channels/4), int(out_channels/2), 5, 3, groups=config.in_channels),
+            NoLayerNormConvLayer(int(out_channels/2), int(out_channels/2), 5, 3, groups=config.in_channels),
+            NoLayerNormConvLayer(int(out_channels/2), out_channels, 5, 2, groups=config.in_channels),
+            NoLayerNormConvLayer(out_channels, out_channels, 3, 3, groups=config.in_channels),
+            NoLayerNormConvLayer(out_channels, hidden_channels, 3, 3, groups=config.in_channels)
         ])
+
+        
+
+        #self.projection_layer = NoLayerNormConvLayer(out_channels, hidden_channels, 1, 1, groups=config.in_channels)
 
     def forward(self, x):
         for layer in self.conv_layers:
             x = layer(x)
+        #print(x.shape)
+        #x = self.projection_layer(x)
+        #print(x.shape)
         return x
     
 class FeatureProjection(nn.Module):
@@ -1202,3 +1242,8 @@ class Classification_1DCNN(nn.Module):
             return loss 
         else:
             return logits
+
+
+
+# on the server 
+# python train_model.py /home/heminq/physionet.org/files/i-care/2.0/training /home/heminq/physionet.org/files/i-care/2.0/trained_models
