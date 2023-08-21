@@ -26,13 +26,6 @@ import copy
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 import time
-import scipy.signal as signal
-from scipy.signal import butter, lfilter
-
-import torchaudio.functional as FA
-import torchaudio
-#import torchaudio.functional as F
-#import torchaudio.transforms as T
 import julius
 
 #%%
@@ -220,36 +213,6 @@ def load_recording_header(record_name, check_values=True):
     return sampling_frequency, length
 
 #%%
-
-# Preprocess data.
-def preprocess_data_old(data, sampling_frequency, utility_frequency):
-    # Define the bandpass frequencies.
-    passband = [0.1, 30.0]
-
-    # Promote the data to double precision because these libraries expect double precision.
-    data = np.asarray(data, dtype=np.float64)
-
-    # If the utility frequency is between bandpass frequencies, then apply a notch filter.
-    if utility_frequency is not None and passband[0] <= utility_frequency <= passband[1]:
-        data = mne.filter.notch_filter(data, sampling_frequency, utility_frequency, n_jobs=4, verbose='error')
-
-    # Apply a bandpass filter.
-    data = mne.filter.filter_data(data, sampling_frequency, passband[0], passband[1], n_jobs=4, verbose='error')
-
-    # Resample the data.
-    if sampling_frequency % 2 == 0:
-        resampling_frequency = 100
-    else:
-        resampling_frequency = 100
-    lcm = np.lcm(int(round(sampling_frequency)), int(round(resampling_frequency)))
-    up = int(round(lcm / sampling_frequency))
-    down = int(round(lcm / resampling_frequency))
-    resampling_frequency = sampling_frequency * up / down
-    data = scipy.signal.resample_poly(data, up, down, axis=1)
-
-    return data, resampling_frequency
-
-
 def preprocess_data(data, sampling_frequency, utility_frequency, device):
     # Define the bandpass frequencies.
     passband = [0.1, 30.0]
