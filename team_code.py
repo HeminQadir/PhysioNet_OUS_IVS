@@ -229,9 +229,9 @@ def preprocess_data(data, sampling_frequency, utility_frequency, device):
     
     #data = bandpass_filter(data, sampling_frequency, passband[0], passband[1], device)
 
-    if sampling_frequency > 2000:
-        data = julius.resample_frac(data, int(sampling_frequency), 1024)
-        sampling_frequency = 1024
+    if sampling_frequency > 1000:
+        data = julius.resample_frac(data, int(sampling_frequency), 512)
+        sampling_frequency = 512
 
     low = passband[0]/int(sampling_frequency)
     high = passband[1]/int(sampling_frequency)
