@@ -484,8 +484,8 @@ def get_config():
     config.num_classes = 2
     config.transformer = ml_collections.ConfigDict()
     config.transformer.mlp_dim = 3072
-    config.transformer.num_heads = 12
-    config.transformer.num_layers = 12
+    config.transformer.num_heads = 8
+    config.transformer.num_layers = 8
     config.transformer.attention_dropout_rate = 0.0
     config.transformer.dropout_rate = 0.1
     config.classifier = 'token'
