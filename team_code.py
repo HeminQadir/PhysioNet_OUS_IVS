@@ -6,6 +6,7 @@ from __future__ import print_function
 #%%
 # Libraries for the first entery
 from helper_code import *
+import logging
 import numpy as np, os, sys
 import mne
 from sklearn.model_selection import train_test_split
@@ -27,6 +28,8 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 import time
 import julius
+
+logger = logging.getLogger(__name__)
 
 #%%
 class WarmupLinearSchedule(LambdaLR):
@@ -113,7 +116,6 @@ def load_train_val_files(data_folder, split=True, split_ratio=0.1):
     else:
         X_train = patient_ids
         return X_train
-
 
 
 #%%
@@ -229,9 +231,9 @@ def preprocess_data(data, sampling_frequency, utility_frequency, device):
     
     #data = bandpass_filter(data, sampling_frequency, passband[0], passband[1], device)
 
-    if sampling_frequency > 1000:
-        data = julius.resample_frac(data, int(sampling_frequency), 512)
-        sampling_frequency = 512
+    if sampling_frequency > 2000:
+        data = julius.resample_frac(data, int(sampling_frequency), 1024)
+        sampling_frequency = 1024
 
     low = passband[0]/int(sampling_frequency)
     high = passband[1]/int(sampling_frequency)
@@ -254,6 +256,32 @@ def preprocess_data(data, sampling_frequency, utility_frequency, device):
 
     return data_resampled, resampling_frequency
 
+
+def bandpassing(data, sampling_frequency, device):
+    # Define the bandpass frequencies.
+    passband = [0.1, 30.0]
+
+    low = passband[0]/int(sampling_frequency)
+    high = passband[1]/int(sampling_frequency)
+
+    bandpass = julius.BandPassFilter(low, high)
+    bandpass = bandpass.to(device)
+    data = bandpass(data)
+    
+    return data
+
+
+def resampling(data, sampling_frequency):
+
+    # Resample the data.
+    if sampling_frequency % 2 == 0:
+        resampling_frequency = 100
+    else:
+        resampling_frequency = 100
+
+    data_resampled = julius.resample_frac(data, int(sampling_frequency), int(resampling_frequency))
+
+    return data_resampled, resampling_frequency
 #%%
 def rescale_data(data):
     # Scale the data to the interval [-1, 1].
@@ -326,63 +354,32 @@ def load_data(data_folder, patient_id, device, train=True):
     group = 'EEG'
 
     size = 30000
-    #bipolar_data = np.zeros((18, size), dtype=np.float32)
-    bipolar_data = torch.zeros((18, size), dtype=torch.float32)
-    bipolar_data  = bipolar_data.to(device)
-    # bipolar_data = np.zeros((18, data.shape[1]), dtype=np.float32)
+    sampling_frequency = 100
+    data = torch.zeros((18, size), dtype=torch.float32)
+    data = data.to(device)
 
     # check if there is at least one EEG record
     if num_recordings > 0:
         random.shuffle(recording_ids)
-        
+
         for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
-                # checking the length of the hour recording 
-                data, channels, sampling_frequency = load_recording_data(recording_location, check_values=True)
-                data = torch.tensor(data, dtype=torch.float32)
-                data = data.to(device)
-                utility_frequency = get_utility_frequency(recording_location + '.hea')
-                length = data.shape[1]
+                
+                sampling_frequency, length = load_recording_header(recording_location, check_values=True)  # we created to read only the header and get the fs
                 five_min_recording = sampling_frequency * 60 * 5
+
+                # checking the length of the hour recording 
                 if length >= five_min_recording:
+                   
+                    data, channels, sampling_frequency = load_recording_data(recording_location, check_values=True)
+                    data = torch.tensor(data, dtype=torch.float32)
+                    data = data.to(device)
+
                     # checking if we have all the channels 
                     if all(channel in channels for channel in eeg_channels):
                         data, channels = reduce_channels(data, channels, eeg_channels)
-                        data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency, device)
-                        data = rescale_data(data)
-
-                        #bipolar_data = np.array([data[0, :] - data[1, :], data[2, :] - data[3, :]], dtype=np.float32) # Convert to bipolar montage: F3-P3 and F4-P4 
-                        
-                        bipolar_data = torch.zeros((18, data.shape[1]), dtype=torch.float32)
-                        
-                        bipolar_data = bipolar_data.to(device)
-
-                        bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
-                        bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
-                        bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
-                        bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
-                    
-                        bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
-                        bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
-                        bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
-                        bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
-                    
-                        bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
-                        bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
-                        bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
-                        bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
-                    
-                        bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
-                        bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
-                        bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
-                        bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
-                    
-                        bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
-                        bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
-
                         break
-
                     else:
                         pass
                 else:
@@ -390,16 +387,45 @@ def load_data(data_folder, patient_id, device, train=True):
             else: 
                 pass
 
-    #last_5_min = int(sampling_frequency * 60 * 5)
-    #last_5_min_data = bipolar_data[:, -last_5_min:]
+    if sampling_frequency > 100:
+        data, sampling_frequency = resampling(data, sampling_frequency)
     
-    sampling_frequency = 100
-    segments = segment_eeg_signal(bipolar_data, 5, 3, sampling_frequency)
+    segments = segment_eeg_signal(data, 5, 3, sampling_frequency)
     indx = random.randint(0, len(segments)-1)
-    data_5_min = segments[indx]
+    data = segments[indx]
 
+    data = rescale_data(data)
 
-    #last_5_min_data = rescale_data(last_5_min_data)
+    bipolar_data = torch.zeros((18, data.shape[1]), dtype=torch.float32)
+    
+    bipolar_data = bipolar_data.to(device)
+
+    bipolar_data[8,:] = data[0,:] - data[1,:];     # Fp1-F3
+    bipolar_data[9,:] = data[1,:] - data[2,:];     # F3-C3
+    bipolar_data[10,:] = data[2,:] - data[3,:];    # C3-P3
+    bipolar_data[11,:] = data[3,:] - data[7,:];    # P3-O1
+
+    bipolar_data[12,:] = data[11,:] - data[12,:];  # Fp2-F4
+    bipolar_data[13,:] = data[12,:] - data[13,:];  # F4-C4
+    bipolar_data[14,:] = data[13,:] - data[14,:];  # C4-P4
+    bipolar_data[15,:] = data[14,:] - data[18,:];  # P4-O2
+
+    bipolar_data[0,:] = data[0,:] - data[4,:];     # Fp1-F7
+    bipolar_data[1,:] = data[4,:] - data[5,:];     # F7-T3
+    bipolar_data[2,:] = data[5,:] - data[6,:];     # T3-T5
+    bipolar_data[3,:] = data[6,:] - data[7,:];     # T5-O1
+
+    bipolar_data[4,:] = data[11,:] - data[15,:];   # Fp2-F8
+    bipolar_data[5,:] = data[15,:] - data[16,:];   # F8-T4
+    bipolar_data[6,:] = data[16,:] - data[17,:];   # T4-T6
+    bipolar_data[7,:] = data[17,:] - data[18,:];   # T6-O2
+
+    bipolar_data[16,:] = data[8,:] - data[9,:];    # Fz-Cz
+    bipolar_data[17,:] = data[9,:] - data[10,:];   # Cz-Pz
+
+    data_5_min = bandpassing(bipolar_data, sampling_frequency, device)
+
+    data_5_min = rescale_data(data_5_min)
     
     if train:
         # Extract labels.
@@ -484,8 +510,8 @@ def get_config():
     config.num_classes = 2
     config.transformer = ml_collections.ConfigDict()
     config.transformer.mlp_dim = 3072
-    config.transformer.num_heads = 8
-    config.transformer.num_layers = 8
+    config.transformer.num_heads = 12
+    config.transformer.num_layers = 12
     config.transformer.attention_dropout_rate = 0.0
     config.transformer.dropout_rate = 0.1
     config.classifier = 'token'
@@ -501,12 +527,14 @@ def setup(device):
     model.to(device)
     num_params = count_parameters(model)
     print(model)
-    print("Number of parameters: ", num_params)
+    logger.info("{}".format(config))
+    logger.info("Total Parameter: \t%2.1fM" % num_params)
     return model
 
 # Save your trained model.
 def save_challenge_model(model_folder, outcome_model, epoch): #, imputer, outcome_model, cpc_model):
     torch.save({'model': outcome_model, 'epoch': epoch,}, os.path.join(model_folder, 'model.pt'))
+    logger.info("Saved model checkpoint to [DIR: %s]", model_folder)
 
 def load_challenge_models(model_folder, verbose):
     filename = os.path.join(model_folder, 'model.pt')
@@ -524,6 +552,9 @@ def valid(model, val_loader, global_step, eval_batch_size, local_rank, device):
     # Validation!
     eval_losses = AverageMeter()
 
+    logger.info("***** Running Validation *****")
+    logger.info("  Num steps = %d", len(val_loader))
+    logger.info("  Batch size = %d", eval_batch_size)
 
     model.eval()
     all_preds, all_label = [], []
@@ -574,7 +605,11 @@ def valid(model, val_loader, global_step, eval_batch_size, local_rank, device):
     #accuracy = simple_accuracy(all_preds, all_label)
     precision = TP / float(TP+FP) * 100
 
-    print("precision: ", precision)
+    logger.info("\n")
+    logger.info("Validation Results")
+    logger.info("Global Steps: %d" % global_step)
+    logger.info("Valid Loss: %2.5f" % eval_losses.avg)
+    logger.info("Valid Precision: %2.5f" % precision)
 
     return precision #accuracy
 
@@ -583,14 +618,14 @@ def valid(model, val_loader, global_step, eval_batch_size, local_rank, device):
 def train(model, data_folder, model_folder, device, num_steps, eval_every, local_rank, train_batch_size, eval_batch_size, learning_rate, n_gpu):
     """ Train the model """
     name = "physionet"
+    if local_rank in [-1, 0]:
+        os.makedirs(data_folder, exist_ok=True)
+
+
     gradient_accumulation_steps = 1
     decay_type = "cosine" #choices=["cosine", "linear"]
     warmup_steps = 500 
     max_grad_norm = 1.0
-
-    if local_rank in [-1, 0]:
-        os.makedirs(model_folder, exist_ok=True)
-
 
     train_batch_size = train_batch_size // gradient_accumulation_steps
 
@@ -647,8 +682,15 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
     else:
         scheduler = WarmupLinearSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
 
-
     # Train!
+    logger.info("***** Running training *****")
+    logger.info("  Total optimization steps = %d", num_steps)
+    logger.info("  Instantaneous batch size per GPU = %d", train_batch_size)
+    logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
+                train_batch_size * gradient_accumulation_steps * (
+                    torch.distributed.get_world_size() if local_rank != -1 else 1))
+    logger.info("  Gradient Accumulation steps = %d", gradient_accumulation_steps)
+
     model.zero_grad()
     seed = 42
     set_seed(seed=seed, n_gpu=n_gpu)  # Added here for reproducibility (even between python 2 and 3)
@@ -703,6 +745,8 @@ def train(model, data_folder, model_folder, device, num_steps, eval_every, local
         if global_step % t_total == 0:
             break
 
+    logger.info("Best Accuracy: \t%f" % best_acc)
+    logger.info("End Training!")
 
 def train_challenge_model(data_folder, model_folder, verbose=2):
     # Required parameters
@@ -719,8 +763,6 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     # Setup CUDA, GPU & distributed training
     if local_rank == -1:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print("#"*100)
-        print(device)
         n_gpu = torch.cuda.device_count()
 
     else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
@@ -729,6 +771,12 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
         torch.distributed.init_process_group(backend='nccl', timeout=timedelta(minutes=60))
         n_gpu = 1
 
+    # Setup logging
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO if local_rank in [-1, 0] else logging.WARN)
+    logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s" %
+                   (local_rank, device, n_gpu, bool(local_rank != -1), fp16))
 
     # Set seed
     set_seed(seed=seed, n_gpu=n_gpu)
@@ -1205,8 +1253,6 @@ class Classification_1DCNN(nn.Module):
             return loss 
         else:
             return logits
-
-
 
 # on the server 
 # python train_model.py /home/heminq/physionet.org/files/i-care/2.0/training /home/heminq/physionet.org/files/i-care/2.0/trained_models
