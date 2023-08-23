@@ -355,7 +355,7 @@ def load_data(data_folder, patient_id, device, train=True):
 
     size = 30000
     sampling_frequency = 100
-    data = torch.zeros((18, size), dtype=torch.float32)
+    data = torch.zeros((19, size), dtype=torch.float32)
     data = data.to(device)
 
     # check if there is at least one EEG record
@@ -363,6 +363,7 @@ def load_data(data_folder, patient_id, device, train=True):
         random.shuffle(recording_ids)
 
         for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
+
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
                 
@@ -788,39 +789,78 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     train(model, data_folder, model_folder, device, num_steps, eval_every, local_rank, train_batch_size, eval_batch_size, learning_rate, n_gpu)
 
 
+def majority(my_list):
+    # Create a dictionary to count occurrences
+    count_dict = {}
+    for i, element in enumerate(my_list):
+        if element in count_dict:
+            count_dict[element].append(i)  # Append the index to the list of indices
+        else:
+            count_dict[element] = [i]
+
+    # Find the element with the highest count
+    most_common_element = max(count_dict, key=lambda k: len(count_dict[k]))
+    
+    return most_common_element
+
+
 #%%
 # Run your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_challenge_models(models, data_folder, patient_id, verbose):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    x = load_data(data_folder, patient_id, device, train=False)
-    
-    if len(x)>0:
-        # Apply models to features.
-        models.eval()
-        outputs, pred_cpcs, _ = models(x.unsqueeze(0))
+    outputs_list = list() 
+    outcome_probabilities_list = list() 
+    pred_cpcs_list = list()
 
-        outcome_probabilities = F.softmax(outputs[0])
-                
-        pred_outcome = torch.argmax(outcome_probabilities)
-        outcome_probability = outcome_probabilities[1]   # predicted probability of a poor outcome
-        outcome_probability = outcome_probability.data.cpu().item()
-        pred_outcome = pred_outcome.data.cpu().item()
-
-        pred_cpcs = pred_cpcs*5
-        pred_cpcs = pred_cpcs.data.cpu().item()
-        pred_cpcs = np.clip(pred_cpcs, 1, 5)  
-
-        print("="*80)
-        print(pred_outcome)
-        print(pred_cpcs)
-        #outcome_probability = round(outcome_probability, 2)
-        print(outcome_probability)
+    for i in range(11):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x = load_data(data_folder, patient_id, device, train=False)
         
-    else:
-        pred_outcome, outcome_probability, pred_cpcs = float(0), float(0), float(0) #float('nan'), float('nan'), float('nan')
+        if len(x)>0:
+            # Apply models to features.
+            models.eval()
+            outputs, pred_cpcs, _ = models(x.unsqueeze(0))
 
+            outcome_probabilities = F.softmax(outputs[0])
+                    
+            pred_outcome = torch.argmax(outcome_probabilities)
+            outcome_probability = outcome_probabilities[1]   # predicted probability of a poor outcome
+            outcome_probability = outcome_probability.data.cpu().item()
+            pred_outcome = pred_outcome.data.cpu().item()
+
+            pred_cpcs = pred_cpcs*5
+            pred_cpcs = pred_cpcs.data.cpu().item()
+            pred_cpcs = round(np.clip(pred_cpcs, 1, 5), 4)  
+
+            outcome_probability = round(outcome_probability, 4)
+            
+            outputs_list.append(pred_outcome)
+            outcome_probabilities_list.append(outcome_probability)
+            pred_cpcs_list.append(pred_cpcs)
+            
+        else:
+            pred_outcome, outcome_probability, pred_cpcs = float(0), float(0), float(0) #float('nan'), float('nan'), float('nan')
+            outputs_list.append(pred_outcome)
+            outcome_probabilities_list.append(outcome_probability)
+            pred_cpcs_list.append(pred_cpcs)
+
+    
+
+    pred_outcome = majority(outputs_list)
+
+    if pred_outcome == 1:
+        outcome_probability  = max(outcome_probabilities_list)
+    else:
+        outcome_probability  = min(outcome_probabilities_list)
+
+    pred_cpcs = round(sum(pred_cpcs_list)/len(pred_cpcs_list), 4)
+    
+    print("="*80)
+    print(pred_outcome)
+    print(pred_cpcs)
+    print(outcome_probability)
+        
     return pred_outcome, outcome_probability, pred_cpcs
 
 
