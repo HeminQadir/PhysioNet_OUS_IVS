@@ -363,16 +363,16 @@ def load_data(data_folder, patient_id, device, train=True):
         random.shuffle(recording_ids)
 
         for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
-
+            print(recording_id)
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
                 
                 sampling_frequency, length = load_recording_header(recording_location, check_values=True)  # we created to read only the header and get the fs
                 five_min_recording = sampling_frequency * 60 * 5
-
+                
                 # checking the length of the hour recording 
                 if length >= five_min_recording:
-                   
+                    
                     data, channels, sampling_frequency = load_recording_data(recording_location, check_values=True)
                     data = torch.tensor(data, dtype=torch.float32)
                     data = data.to(device)
@@ -384,13 +384,14 @@ def load_data(data_folder, patient_id, device, train=True):
                     else:
                         pass
                 else:
-                    pass
+                    sampling_frequency = 100
             else: 
                 pass
 
+
     if sampling_frequency > 100:
         data, sampling_frequency = resampling(data, sampling_frequency)
-    
+
     segments = segment_eeg_signal(data, 5, 3, sampling_frequency)
     indx = random.randint(0, len(segments)-1)
     data = segments[indx]
@@ -756,7 +757,7 @@ def train_challenge_model(data_folder, model_folder, verbose=2):
     eval_batch_size = 10
     eval_every = 500
     learning_rate = 1e-4 
-    num_steps = 30000
+    num_steps = 35000
     local_rank = -1
     seed = 42
     fp16 = False
