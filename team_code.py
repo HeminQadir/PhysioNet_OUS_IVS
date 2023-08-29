@@ -363,7 +363,6 @@ def load_data(data_folder, patient_id, device, train=True):
         random.shuffle(recording_ids)
 
         for recording_id in recording_ids:    #for recording_id in reversed(recording_ids):
-            print(recording_id)
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
                 
